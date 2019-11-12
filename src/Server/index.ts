@@ -1,7 +1,11 @@
+// @ts-ignore
 import { Elm } from "./Main.elm";
 import Bugout from "bugout";
 
+type Name = string;
+
 const SERVER_NAME_PREFIX = "wolfadex__chat__server__";
+// @ts-ignore
 const servers = Object.entries(localStorage).reduce(function(
 	foundServers,
 	[key, value],
@@ -22,7 +26,7 @@ const app = Elm.Server.Main.init({
 });
 let currentServer;
 
-app.ports.startServer.subscribe(function(name) {
+app.ports.startServer.subscribe(function(name): void {
 	if (servers[`${SERVER_NAME_PREFIX}${name}`] == null) {
 		currentServer = new Bugout();
 	} else {
@@ -37,29 +41,30 @@ app.ports.startServer.subscribe(function(name) {
 	app.ports.serverStarted.send([name, currentServer.address()]);
 });
 
-app.ports.shutDownServer.subscribe(function() {
+app.ports.shutDownServer.subscribe(function(): void {
 	if (currentServer != null) {
 		currentServer.destroy(function() {
 			app.ports.serverShutDown.send(existingServerNames());
-		})
+		});
 	} else {
 		app.ports.serverShutDown.send(existingServerNames());
 	}
-})
+});
 
-app.ports.deleteServer.subscribe(function(name) {
+app.ports.deleteServer.subscribe(function(name): void {
 	localStorage.removeItem(`${SERVER_NAME_PREFIX}${name}`);
-	delete servers[`${SERVER_NAME_PREFIX}${name}`]
-})
+	delete servers[`${SERVER_NAME_PREFIX}${name}`];
+});
 
-function registerAPI() {
+function registerAPI(): void {
 	currentServer.register("ping", function(clientAddress, args, respond) {
 		console.log(args);
 		respond({ message: "pong" });
 	});
 }
 
-function existingServerNames() {
+function existingServerNames(): Array<Name> {
 	return Object.keys(servers).map((name) =>
-		name.replace(SERVER_NAME_PREFIX, "")
+		name.replace(SERVER_NAME_PREFIX, ""),
+	);
 }

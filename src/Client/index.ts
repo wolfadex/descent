@@ -1,3 +1,4 @@
+// @ts-ignore
 import { Elm } from "./Main.elm";
 
 const app = Elm.Client.Main.init({
