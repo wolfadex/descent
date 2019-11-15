@@ -56,10 +56,38 @@ app.ports.deleteServer.subscribe(function(name): void {
 	delete servers[`${SERVER_NAME_PREFIX}${name}`];
 });
 
+app.ports.forwardMessage.subscribe(function({
+	sender,
+	recipients,
+	content,
+	time,
+}) {
+	if (currentServer != null) {
+		recipients.forEach(function(client) {
+			currentServer.send(client, {
+				action: "forwardMessage",
+				payload: { sender, content, time },
+			});
+		});
+	}
+});
+
 function registerAPI(): void {
-	currentServer.register("ping", function(clientAddress, args, respond) {
-		console.log(args);
-		respond({ message: "pong" });
+	currentServer.on("seen", function(clientAddress) {
+		app.ports.newClient.send(clientAddress);
+		// currentServer.send(clientAddress, "Welcome!");
+	});
+	currentServer.register("setUsername", function(clientAddress, name) {
+		console.log("TODO", "set user name", clientAddress, name);
+		// app.ports.setUsername.send([clientAddress, name]);
+	});
+	currentServer.register("message", function(clientAddress, content) {
+		console.log("Message", clientAddress, content);
+		app.ports.messageReceived.send([
+			clientAddress,
+			content,
+			Math.floor(Date.now() / 1000),
+		]);
 	});
 }
 
