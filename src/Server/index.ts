@@ -63,6 +63,7 @@ app.ports.forwardMessage.subscribe(function({
 	time,
 }) {
 	if (currentServer != null) {
+		console.log("Forwarding message", sender, recipients, content, time);
 		recipients.forEach(function(client) {
 			currentServer.send(client, {
 				action: "forwardMessage",
@@ -77,11 +78,17 @@ function registerAPI(): void {
 		app.ports.newClient.send(clientAddress);
 		// currentServer.send(clientAddress, "Welcome!");
 	});
-	currentServer.register("setUsername", function(clientAddress, name) {
+	currentServer.register("setUsername", function(
+		clientAddress,
+		name,
+		callback,
+	) {
+		callback("");
 		console.log("TODO", "set user name", clientAddress, name);
 		// app.ports.setUsername.send([clientAddress, name]);
 	});
-	currentServer.register("message", function(clientAddress, content) {
+	currentServer.register("message", function(clientAddress, content, callback) {
+		callback("");
 		console.log("Message", clientAddress, content);
 		app.ports.messageReceived.send([
 			clientAddress,

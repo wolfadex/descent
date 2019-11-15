@@ -70,7 +70,7 @@ messageToMsg serverAddress ( address, message ) =
                 msg
 
             Err err ->
-                Debug.todo "handle decode server message error"
+                Debug.todo ("handle decode server message error: " ++ Json.Decode.errorToString err)
 
     else
         Debug.todo "handle peer client message"
@@ -83,7 +83,7 @@ decodeServerMessage =
             (\action ->
                 case action of
                     "forwardMessage" ->
-                        decodeForwardMessage
+                        Json.Decode.field "payload" decodeForwardMessage
 
                     _ ->
                         Json.Decode.fail ("Unrecognized action: " ++ action)
@@ -268,8 +268,8 @@ view model =
                         , Element.width Element.fill
                         ]
                         [ Element.column
-                            [ Element.height Element.fill ]
-                            (List.map viewMessage messages)
+                            [ Element.height Element.fill, Element.alignBottom ]
+                            (List.map viewMessage (List.reverse messages))
                         , Element.row
                             []
                             [ Input.text
@@ -291,4 +291,6 @@ view model =
 
 viewMessage : Message -> Element Msg
 viewMessage { client, content, timestamp } =
-    Element.text (client ++ " says: " ++ content)
+    Element.el
+        [ Element.alignBottom ]
+    <| Element.text (client ++ " says: " ++ content)

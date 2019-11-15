@@ -247,7 +247,6 @@ encodeMessage { clients } { client, content, timestamp } =
         [ ( "sender", Json.Encode.string client )
         , ( "recipients"
           , clients
-                |> Dict.remove client
                 |> Dict.toList
                 |> List.map Tuple.first
                 |> Json.Encode.list Json.Encode.string

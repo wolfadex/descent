@@ -15,10 +15,11 @@ app.ports.connectToServer.subscribe(function(serverAddress) {
 	});
 
 	client.on("message", function(address, message) {
+		console.log("Message received", address === serverAddress, message);
 		app.ports.messageReceived.send([address, message]);
 	});
 });
 
 app.ports.sendMessage.subscribe(function(content) {
-	client.rpc("message", content);
+	client.rpc("message", content, () => {});
 });
