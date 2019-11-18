@@ -13,7 +13,7 @@ const servers = Object.entries(localStorage).reduce(function(
 	if (key.startsWith(SERVER_NAME_PREFIX)) {
 		return {
 			...foundServers,
-			[key]: value,
+			[key]: JSON.parse(value),
 		};
 	} else {
 		return foundServers;
@@ -22,32 +22,41 @@ const servers = Object.entries(localStorage).reduce(function(
 {});
 const app = Elm.Server.Main.init({
 	node: document.getElementById("root"),
-	flags: existingServerNames(),
+	flags: existingServers(),
 });
 let currentServer;
 
-app.ports.startServer.subscribe(function(name): void {
+app.ports.startServer.subscribe(function([name, serverType]): void {
 	if (servers[`${SERVER_NAME_PREFIX}${name}`] == null) {
 		currentServer = new Bugout();
 	} else {
 		currentServer = new Bugout({
-			seed: servers[`${SERVER_NAME_PREFIX}${name}`],
+			seed: servers[`${SERVER_NAME_PREFIX}${name}`].seed,
 		});
 	}
 
-	servers[`${SERVER_NAME_PREFIX}${name}`] = currentServer.seed;
-	localStorage.setItem(`${SERVER_NAME_PREFIX}${name}`, currentServer.seed);
+	const serverData = { seed: currentServer.seed, serverType };
+	servers[`${SERVER_NAME_PREFIX}${name}`] = serverData;
+	localStorage.setItem(
+		`${SERVER_NAME_PREFIX}${name}`,
+		JSON.stringify(serverData),
+	);
+
 	registerAPI();
-	app.ports.serverStarted.send([name, currentServer.address()]);
+	app.ports.serverStarted.send({
+		name,
+		address: currentServer.address(),
+		serverType,
+	});
 });
 
 app.ports.shutDownServer.subscribe(function(): void {
 	if (currentServer != null) {
 		currentServer.destroy(function() {
-			app.ports.serverShutDown.send(existingServerNames());
+			app.ports.serverShutDown.send(existingServers());
 		});
 	} else {
-		app.ports.serverShutDown.send(existingServerNames());
+		app.ports.serverShutDown.send(existingServers());
 	}
 });
 
@@ -98,8 +107,9 @@ function registerAPI(): void {
 	});
 }
 
-function existingServerNames(): Array<Name> {
-	return Object.keys(servers).map((name) =>
+function existingServers(): Array<[Name, string]> {
+	return Object.entries(servers).map(([name, { serverType }]) => [
 		name.replace(SERVER_NAME_PREFIX, ""),
-	);
+		serverType,
+	]);
 }

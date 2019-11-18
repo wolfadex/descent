@@ -23,3 +23,7 @@ app.ports.connectToServer.subscribe(function(serverAddress) {
 app.ports.sendMessage.subscribe(function(content) {
 	client.rpc("message", content, () => {});
 });
+
+app.ports.unknownServerMessage.subscribe(function(err) {
+	console.log("The server sent a message the client doesn't recognize", err);
+});

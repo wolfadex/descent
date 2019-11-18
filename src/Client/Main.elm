@@ -1,7 +1,10 @@
 port module Client.Main exposing (main)
 
 import Browser
+import Chat exposing (Address, Client, Name)
+import Dict exposing (Dict)
 import Element exposing (Element)
+import Element.Keyed as Keyed
 import Element.Input as Input
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, Value)
@@ -23,15 +26,17 @@ main =
 type Model
     = Waiting { username : Name, serverName : Name, serverAddress : Address }
     | Connecting { username : Name, serverName : Name, serverAddress : Address }
-    | Running { username : Name, serverName : Name, serverAddress : Address, messages : List Message, newMessage : String }
+    | Running RunningData
 
 
-type alias Name =
-    String
-
-
-type alias Address =
-    String
+type alias RunningData =
+    { username : Name
+    , serverName : Name
+    , serverAddress : Address
+    , messages : List Message
+    , newMessage : String
+    , clients : Dict Address Client
+    }
 
 
 type alias Message =
@@ -70,7 +75,7 @@ messageToMsg serverAddress ( address, message ) =
                 msg
 
             Err err ->
-                Debug.todo ("handle decode server message error: " ++ Json.Decode.errorToString err)
+                UnknownServerMessage (Json.Decode.errorToString err)
 
     else
         Debug.todo "handle peer client message"
@@ -127,11 +132,15 @@ type Msg
     | ForwardedMessage Message
     | SetMessage String
     | SendMessage
+    | UnknownServerMessage String
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        UnknownServerMessage err ->
+            ( model, unknownServerMessage err )
+
         ForwardedMessage message ->
             case model of
                 Running data ->
@@ -176,12 +185,13 @@ update msg model =
             case model of
                 Connecting data ->
                     ( Running
-                            { username = data.username
-                            , serverName = data.serverName
-                            , serverAddress = data.serverAddress
-                            , messages = []
-                            , newMessage = ""
-                            }
+                        { username = data.username
+                        , serverName = data.serverName
+                        , serverAddress = data.serverAddress
+                        , messages = []
+                        , newMessage = ""
+                        , clients = Dict.empty
+                        }
                     , Cmd.none
                     )
 
@@ -209,6 +219,9 @@ port connectToServer : String -> Cmd msg
 
 
 port sendMessage : String -> Cmd msg
+
+
+port unknownServerMessage : String -> Cmd msg
 
 
 view : Model -> Html Msg
@@ -253,7 +266,7 @@ view model =
             Connecting _ ->
                 Element.text "Connecting ..."
 
-            Running { username, serverName, messages, newMessage } ->
+            Running { username, serverName, messages, newMessage, clients } ->
                 Element.row
                     [ Element.width Element.fill
                     , Element.height Element.fill
@@ -267,9 +280,9 @@ view model =
                         [ Element.height Element.fill
                         , Element.width Element.fill
                         ]
-                        [ Element.column
+                        [ Keyed.column
                             [ Element.height Element.fill, Element.alignBottom ]
-                            (List.map viewMessage (List.reverse messages))
+                            (List.map (viewMessage clients) (List.reverse messages))
                         , Element.row
                             []
                             [ Input.text
@@ -289,8 +302,19 @@ view model =
                     ]
 
 
-viewMessage : Message -> Element Msg
-viewMessage { client, content, timestamp } =
-    Element.el
+viewMessage : Dict Address Client -> Message -> ( String, Element Msg )
+viewMessage clients { client, content, timestamp } =
+    let
+        clientData = Dict.get client clients
+
+        displayName =
+            case clientData of
+                Just { username } -> username
+                Nothing -> client
+    in
+    ( client ++ "__" ++ (timestamp |> Time.posixToMillis |> String.fromInt)
+    , Element.el
         [ Element.alignBottom ]
-    <| Element.text (client ++ " says: " ++ content)
+    <|
+        Element.text (displayName ++ " says: " ++ content)
+    )
