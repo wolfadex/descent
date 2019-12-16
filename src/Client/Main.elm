@@ -1,7 +1,7 @@
 port module Client.Main exposing (main)
 
 import Browser
-import Chat exposing (Address, Client, Name)
+import Chat exposing (Address, Client, Name, Server)
 import Dict exposing (Dict)
 import Element exposing (Element)
 import Element.Keyed as Keyed
@@ -88,11 +88,19 @@ decodeServerMessage =
             (\action ->
                 case action of
                     "forwardMessage" ->
-                        Json.Decode.field "payload" decodeForwardMessage
+                         decodePayload decodeForwardMessage
+
+                    "setServerType" ->
+                        decodePayload (Json.Decode.map SetServerType Chat.decodeServer)
 
                     _ ->
                         Json.Decode.fail ("Unrecognized action: " ++ action)
             )
+
+
+decodePayload : Decoder a -> Decoder a
+decodePayload =
+    Json.Decode.field "payload"
 
 
 decodeForwardMessage : Decoder Msg
@@ -133,6 +141,7 @@ type Msg
     | SetMessage String
     | SendMessage
     | UnknownServerMessage String
+    | SetServerType Server
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -197,6 +206,10 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+        SetServerType serverType ->
+            ( model, Cmd.none )
+
 
         SetMessage message ->
             case model of

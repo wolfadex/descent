@@ -2,10 +2,7 @@
 import { Elm } from "./Main.elm";
 import Bugout from "bugout";
 
-type Name = string;
-
 const SERVER_NAME_PREFIX = "wolfadex__chat__server__";
-// @ts-ignore
 const servers = Object.entries(localStorage).reduce(function(
 	foundServers,
 	[key, value],
@@ -26,7 +23,7 @@ const app = Elm.Server.Main.init({
 });
 let currentServer;
 
-app.ports.startServer.subscribe(function([name, serverType]): void {
+app.ports.startServer.subscribe(function([name, serverType]) {
 	if (servers[`${SERVER_NAME_PREFIX}${name}`] == null) {
 		currentServer = new Bugout();
 	} else {
@@ -42,7 +39,7 @@ app.ports.startServer.subscribe(function([name, serverType]): void {
 		JSON.stringify(serverData),
 	);
 
-	registerAPI();
+	registerAPI(serverType);
 	app.ports.serverStarted.send({
 		name,
 		address: currentServer.address(),
@@ -50,7 +47,7 @@ app.ports.startServer.subscribe(function([name, serverType]): void {
 	});
 });
 
-app.ports.shutDownServer.subscribe(function(): void {
+app.ports.shutDownServer.subscribe(function() {
 	if (currentServer != null) {
 		currentServer.destroy(function() {
 			app.ports.serverShutDown.send(existingServers());
@@ -60,7 +57,7 @@ app.ports.shutDownServer.subscribe(function(): void {
 	}
 });
 
-app.ports.deleteServer.subscribe(function(name): void {
+app.ports.deleteServer.subscribe(function(name) {
 	localStorage.removeItem(`${SERVER_NAME_PREFIX}${name}`);
 	delete servers[`${SERVER_NAME_PREFIX}${name}`];
 });
@@ -82,10 +79,13 @@ app.ports.forwardMessage.subscribe(function({
 	}
 });
 
-function registerAPI(): void {
+function registerAPI(serverType) {
 	currentServer.on("seen", function(clientAddress) {
 		app.ports.newClient.send(clientAddress);
-		// currentServer.send(clientAddress, "Welcome!");
+		currentServer.send(clientAddress, {
+			action: "setServerType",
+			payload: serverType,
+		});
 	});
 	currentServer.register("setUsername", function(
 		clientAddress,
@@ -107,7 +107,7 @@ function registerAPI(): void {
 	});
 }
 
-function existingServers(): Array<[Name, string]> {
+function existingServers() {
 	return Object.entries(servers).map(([name, { serverType }]) => [
 		name.replace(SERVER_NAME_PREFIX, ""),
 		serverType,
