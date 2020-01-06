@@ -1,11 +1,11 @@
 port module Server.Main exposing (main)
 
 import Browser
-import Chat exposing (Address, Name, Server(..))
-import Dict exposing (Dict)
+import Chat exposing (Address, Name)
 import Element exposing (Element)
 import Element.Keyed as Keyed
 import Element.Input as Input
+import Element.Font as Font
 import Html exposing (Html)
 import Json.Encode exposing (Value)
 import Json.Decode exposing (Decoder)
@@ -26,20 +26,19 @@ main =
 
 
 type alias Flags =
-    List ( String, String )
+    List Name
 
 
 type Model
     = Waiting WaitingData
     | Starting WaitingData
-    | Running { name : Name, type_ : Server, address : Address, clients : Set Address, messages : List Message }
+    | Running { name : Name, address : Address, clients : Set Address, messages : List Message }
     | ShuttingDown
 
 
 type alias WaitingData =
     { name : Name
-    , type_ : Server
-    , existingServers : Dict Name Server
+    , existingServers : Set Name
     }
 
 
@@ -54,20 +53,10 @@ init : Flags -> ( Model, Cmd Msg )
 init existingServers =
     ( Waiting
         { name = ""
-        , existingServers = existingServerDecode existingServers
-        , type_ = Ephemeral
+        , existingServers = Set.fromList existingServers
         }
     , Cmd.none
     )
-
-
-existingServerDecode : Flags -> Dict Name Server
-existingServerDecode existingServers =
-    Dict.fromList
-        (List.map
-            (Tuple.mapSecond Chat.serverTypeFromString)
-            existingServers
-        )
 
 
 subscriptions : Model -> Sub Msg
@@ -83,16 +72,14 @@ subscriptions _ =
 port serverStarted : (Value -> msg) -> Sub msg
 
 
-decodeServerStarted : Decoder ( Name, Address, Server )
+decodeServerStarted : Decoder ( Name, Address )
 decodeServerStarted =
-    Json.Decode.map3
-        (\n a s -> ( n, a, s ))
+    Json.Decode.map2 Tuple.pair
         (Json.Decode.field "name" Json.Decode.string)
         (Json.Decode.field "address" Json.Decode.string)
-        (Json.Decode.field "serverType" Chat.decodeServer)
 
 
-port serverShutDown : (List ( String, String ) -> msg) -> Sub msg
+port serverShutDown : (List Name -> msg) -> Sub msg
 
 
 port newClient : (Address -> msg) -> Sub msg
@@ -103,17 +90,16 @@ port messageReceived : (( Address, String, Int ) -> msg) -> Sub msg
 
 type Msg
     = ServerStarted Value
-    | StartServer Name Server
+    | StartServer Name
     | DeleteServer Name
     | SetServerName Name
     | AttempShutDown
-    | ShutDown Flags
+    | ShutDown (List Name)
     | NewClient Address
     | MessageReceived ( Address, String, Int )
-    | SetServerType Server
 
 
-port startServer : ( String, String ) -> Cmd msg
+port startServer : String -> Cmd msg
 
 
 port shutDownServer : () -> Cmd msg
@@ -146,8 +132,8 @@ update msg model =
             case model of
                 Starting _ ->
                     case Json.Decode.decodeValue decodeServerStarted value of
-                        Ok ( name, address, type_ ) ->
-                            ( Running { name = name, address = address, clients = Set.empty, messages = [], type_ = type_ }, Cmd.none )
+                        Ok ( name, address ) ->
+                            ( Running { name = name, address = address, clients = Set.empty, messages = [] }, Cmd.none )
 
 
                         Err _ ->
@@ -156,10 +142,10 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        StartServer name type_ ->
+        StartServer name ->
             case model of
                 Waiting data ->
-                    ( Starting data, startServer ( name, Chat.serverToString type_ ) )
+                    ( Starting data, startServer name )
 
                 _ ->
                     ( model, Cmd.none )
@@ -167,10 +153,10 @@ update msg model =
         DeleteServer name ->
             case model of
                 Waiting data ->
-                    ( Waiting { data | existingServers = Dict.remove name data.existingServers }, deleteServer name )
+                    ( Waiting { data | existingServers = Set.remove name data.existingServers }, deleteServer name )
 
                 Starting data ->
-                    ( Starting { data | existingServers = Dict.remove name data.existingServers }, deleteServer name )
+                    ( Starting { data | existingServers = Set.remove name data.existingServers }, deleteServer name )
 
                 _ ->
                     ( model, Cmd.none )
@@ -194,7 +180,7 @@ update msg model =
         ShutDown existingServers ->
             case model of
                 ShuttingDown ->
-                    ( Waiting { name = "", existingServers = existingServerDecode existingServers, type_ = Ephemeral }, Cmd.none )
+                    ( Waiting { name = "", existingServers = Set.fromList existingServers }, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -205,14 +191,6 @@ update msg model =
                     ( Running { data | clients = Set.insert address data.clients }
                     , Cmd.none
                     )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        SetServerType server ->
-            case model of
-                Waiting data ->
-                    ( Waiting { data | type_ = server }, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -238,6 +216,7 @@ view model =
     Element.layout
         [ Element.width Element.fill
         , Element.height Element.fill
+        , Element.padding 16
         ]
     <|
         case model of
@@ -251,9 +230,12 @@ view model =
                 Element.column
                     [ Element.centerX
                     , Element.centerY
+                    , Element.spacing 8
                     ]
-                    [ Element.text ("Server \"" ++ name ++ "\" running")
-                    , Element.text ("Server address: " ++ address)
+                    [ Element.text ("Name: " ++ name)
+                    , Element.text "Status: Running"
+                    , Element.text ("Address: " ++ address)
+                    , Element.el [ Font.size 16 ] (Element.text "Give a friend the address so they can connect!")
                     , Ui.button
                         Ui.Color.danger
                         { onPress = Just AttempShutDown
@@ -268,25 +250,25 @@ view model =
                 Element.text "Shutting down"
 
 
-viewExistingServer : ( Name, Server ) -> Element Msg
-viewExistingServer ( name, server ) =
+viewExistingServer : Name -> Element Msg
+viewExistingServer name =
     Element.el
         (Ui.card ++ [ Element.width Element.fill ])
     <|
         Element.column
-            [ Element.width Element.fill ]
-            [ Element.text (Chat.serverToString server ++ ": " ++ name)
-            , Ui.spacerVertical <| Element.px 16
+            [ Element.width Element.fill
+            , Element.spacing 16
+            ]
+            [ Element.el [ Font.bold ] (Element.text name)
             , Element.row
                 [ Element.width Element.fill ]
                 [ Ui.button
                     []
-                    { onPress = Just (StartServer name server)
+                    { onPress = Just (StartServer name)
                     , label = Element.text "Start"
                     }
-                , Ui.spacerHorizontal Element.fill
                 , Ui.button
-                    Ui.Color.danger
+                    (Ui.Color.danger ++ [ Element.alignRight ])
                     { onPress = Just (DeleteServer name)
                     , label = Element.text "Delete"
                     }
@@ -307,7 +289,7 @@ viewMessage { client, content, timestamp } =
 
 
 viewNewServer : WaitingData -> Element Msg
-viewNewServer { name, existingServers, type_ } =
+viewNewServer { name, existingServers } =
     Element.column
         [ Element.centerX
         , Element.height Element.fill
@@ -321,20 +303,9 @@ viewNewServer { name, existingServers, type_ } =
                 , placeholder = Nothing
                 , label = Input.labelLeft [] <| Element.text "Server Name"
                 }
-            -- NOTE: Hide this until we're ready to support Persistent
-            --, Input.radio
-            --    []
-            --    { onChange = SetServerType
-            --    , selected = Just type_
-            --    , label =Input.labelLeft [] (Element.text "Server Type")
-            --    , options =
-            --        [ Input.option Ephemeral (Element.text <| Chat.serverToString Ephemeral)
-            --        , Input.option Persistent (Element.text <| Chat.serverToString Persistent)
-            --        ]
-            --    }
             , Ui.button
                 Ui.Color.primary
-                { onPress = Just (StartServer name type_)
+                { onPress = Just (StartServer name)
                 , label = Element.text "Start"
                 }
             ]
@@ -350,7 +321,7 @@ viewNewServer { name, existingServers, type_ } =
             , Element.column
                 [ Element.width Element.fill ]
                 (existingServers
-                    |> Dict.toList
+                    |> Set.toList
                     |> List.map viewExistingServer
                     |> List.intersperse (Ui.spacerVertical <| Element.px 16)
                 )

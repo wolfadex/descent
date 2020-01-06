@@ -1,27 +1,37 @@
-// @ts-ignore
-import { Elm } from "./Main.elm";
 import Bugout from "bugout";
+import httpHijack from "../http-hijack.js";
+import { Elm } from "./Main.elm";
+import { trackers } from "../utils.js";
 
 const app = Elm.Client.Main.init({
 	node: document.getElementById("root"),
 });
-let client;
 
-app.ports.connectToServer.subscribe(function(serverAddress) {
-	client = new Bugout(serverAddress);
+httpHijack("bugout", window, function(router) {
+	router.post("connect", function(req, res) {
+		const serverAddress = req.body;
+		const client = new Bugout(serverAddress, {
+			announce: trackers,
+		});
 
-	client.on("server", function() {
-		app.ports.serverConnected.send(serverAddress);
+		client.on("server", function() {
+			console.log("connected");
+			res.json({ client });
+		});
+
+		client.on("message", function(address, message) {
+			console.log("Message received", address === serverAddress, message);
+			app.ports.messageReceived.send([address, message]);
+		});
 	});
 
-	client.on("message", function(address, message) {
-		console.log("Message received", address === serverAddress, message);
-		app.ports.messageReceived.send([address, message]);
-	});
-});
+	router.post("message", function(req, res) {
+		const { client, message, timestamp } = req.body;
 
-app.ports.sendMessage.subscribe(function(content) {
-	client.rpc("message", content, () => {});
+		client.rpc("message", message, function(actualTimestamp) {
+			app.ports.messageReceived.send({ timestamp, actualTimestamp });
+		});
+	});
 });
 
 app.ports.unknownServerMessage.subscribe(function(err) {

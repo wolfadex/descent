@@ -1,6 +1,6 @@
-// @ts-ignore
-import { Elm } from "./Main.elm";
 import Bugout from "bugout";
+import { Elm } from "./Main.elm";
+import { trackers } from "../utils.js";
 
 const SERVER_NAME_PREFIX = "wolfadex__chat__server__";
 const servers = Object.entries(localStorage).reduce(function(
@@ -23,27 +23,29 @@ const app = Elm.Server.Main.init({
 });
 let currentServer;
 
-app.ports.startServer.subscribe(function([name, serverType]) {
+app.ports.startServer.subscribe(function(name) {
 	if (servers[`${SERVER_NAME_PREFIX}${name}`] == null) {
-		currentServer = new Bugout();
+		currentServer = new Bugout({
+			announce: trackers,
+		});
 	} else {
 		currentServer = new Bugout({
 			seed: servers[`${SERVER_NAME_PREFIX}${name}`].seed,
+			announce: trackers,
 		});
 	}
 
-	const serverData = { seed: currentServer.seed, serverType };
+	const serverData = { seed: currentServer.seed };
 	servers[`${SERVER_NAME_PREFIX}${name}`] = serverData;
 	localStorage.setItem(
 		`${SERVER_NAME_PREFIX}${name}`,
 		JSON.stringify(serverData),
 	);
 
-	registerAPI(serverType);
+	registerAPI();
 	app.ports.serverStarted.send({
 		name,
 		address: currentServer.address(),
-		serverType,
 	});
 });
 
@@ -79,13 +81,9 @@ app.ports.forwardMessage.subscribe(function({
 	}
 });
 
-function registerAPI(serverType) {
+function registerAPI() {
 	currentServer.on("seen", function(clientAddress) {
 		app.ports.newClient.send(clientAddress);
-		currentServer.send(clientAddress, {
-			action: "setServerType",
-			payload: serverType,
-		});
 	});
 	currentServer.register("setUsername", function(
 		clientAddress,
@@ -97,19 +95,15 @@ function registerAPI(serverType) {
 		// app.ports.setUsername.send([clientAddress, name]);
 	});
 	currentServer.register("message", function(clientAddress, content, callback) {
-		callback("");
+		const actualTimestamp = Math.floor(Date.now() / 1000);
 		console.log("Message", clientAddress, content);
-		app.ports.messageReceived.send([
-			clientAddress,
-			content,
-			Math.floor(Date.now() / 1000),
-		]);
+		app.ports.messageReceived.send([clientAddress, content, actualTimestamp]);
+		callback(actualTimestamp);
 	});
 }
 
 function existingServers() {
-	return Object.entries(servers).map(([name, { serverType }]) => [
+	return Object.keys(servers).map((name) =>
 		name.replace(SERVER_NAME_PREFIX, ""),
-		serverType,
-	]);
+	);
 }

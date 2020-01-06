@@ -1,13 +1,15 @@
 port module Client.Main exposing (main)
 
 import Browser
-import Chat exposing (Address, Client, Name, Server)
+import Chat exposing (Address, Client, Name)
 import Dict exposing (Dict)
 import Element exposing (Element)
 import Element.Keyed as Keyed
 import Element.Input as Input
 import Html exposing (Html)
+import Http
 import Json.Decode exposing (Decoder, Value)
+import Json.Encode
 import Time exposing (Posix)
 import Ui
 import Ui.Color
@@ -24,18 +26,14 @@ main =
 
 
 type Model
-    = Waiting { username : Name, serverName : Name, serverAddress : Address }
-    | Connecting { username : Name, serverName : Name, serverAddress : Address }
-    | Running RunningData
+    = Waiting ConnectionData
+    | Connecting ConnectionData
+    | Running Server
 
 
-type alias RunningData =
-    { username : Name
-    , serverName : Name
-    , serverAddress : Address
-    , messages : List Message
-    , newMessage : String
-    , clients : Dict Address Client
+type alias ConnectionData =
+    { name : Name
+    , address : Address
     }
 
 
@@ -45,10 +43,38 @@ type alias Message =
     , timestamp : Posix
     }
 
+type Request d
+    = Loading
+    | Failure Http.Error
+    | Success d
+
+
+type alias Server =
+    { name : Name
+    , address : Address
+    , context : Context
+    , messages : List Message
+    , newMessage : String
+    , clients : Dict Address Client
+    }
+
+
+type Context = Context Value
+
+
+setContext : Value -> Context
+setContext =
+    Context
+
+
+getContext : Context -> Value
+getContext (Context val) =
+    val
+
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( Waiting { username = "", serverName = "", serverAddress = "" }
+    ( Waiting { name = "", address = "" }
     , Cmd.none
     )
 
@@ -56,12 +82,8 @@ init _ =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ serverConnected ServerConnected
-        , messageReceived (messageToMsg <| serverAddressFromModel model)
+        [ messageReceived (messageToMsg <| serverAddressFromModel model)
         ]
-
-
-port serverConnected : (String -> msg) -> Sub msg
 
 
 port messageReceived : (( Address, Value ) -> msg) -> Sub msg
@@ -89,9 +111,6 @@ decodeServerMessage =
                 case action of
                     "forwardMessage" ->
                          decodePayload decodeForwardMessage
-
-                    "setServerType" ->
-                        decodePayload (Json.Decode.map SetServerType Chat.decodeServer)
 
                     _ ->
                         Json.Decode.fail ("Unrecognized action: " ++ action)
@@ -121,27 +140,25 @@ decodeForwardMessage =
 serverAddressFromModel : Model -> Address
 serverAddressFromModel model =
     case model of
-        Waiting { serverAddress } ->
-            serverAddress
+        Waiting { address } ->
+            address
 
-        Connecting { serverAddress } ->
-            serverAddress
+        Connecting { address } ->
+            address
 
-        Running { serverAddress } ->
-            serverAddress
+        Running { address } ->
+            address
 
 
 type Msg
-    = SetUsername Name
-    | SetServerName Name
+    = SetServerName Name
     | SetServerAddress Address
     | ConnectToServer
-    | ServerConnected Address
+    | ServerConnected (Result Http.Error Server)
     | ForwardedMessage Message
     | SetMessage String
     | SendMessage
     | UnknownServerMessage String
-    | SetServerType Server
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -158,18 +175,10 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        SetUsername name ->
-            case model of
-                Waiting data ->
-                    ( Waiting { data | username = name }, Cmd.none )
-
-                _ ->
-                    ( model, Cmd.none )
-
         SetServerName name ->
             case model of
                 Waiting data ->
-                    ( Waiting { data | serverName = name }, Cmd.none )
+                    ( Waiting { data | name = name }, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -177,7 +186,7 @@ update msg model =
         SetServerAddress address ->
             case model of
                 Waiting data ->
-                    ( Waiting { data | serverAddress = address }, Cmd.none )
+                    ( Waiting { data | address = address }, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -185,30 +194,38 @@ update msg model =
         ConnectToServer ->
             case model of
                 Waiting data ->
-                    ( Connecting data, connectToServer data.serverAddress )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        ServerConnected _ ->
-            case model of
-                Connecting data ->
-                    ( Running
-                        { username = data.username
-                        , serverName = data.serverName
-                        , serverAddress = data.serverAddress
-                        , messages = []
-                        , newMessage = ""
-                        , clients = Dict.empty
+                    ( Connecting data
+                    , Http.post
+                        { url = "bugout:connect"
+                        , body =
+                            data.address
+                                |> Json.Encode.string
+                                |> Http.jsonBody
+                        , expect = Http.expectJson ServerConnected (decodeServerConnected data)
                         }
-                    , Cmd.none
                     )
 
                 _ ->
                     ( model, Cmd.none )
 
-        SetServerType serverType ->
-            ( model, Cmd.none )
+        ServerConnected result ->
+            case model of
+                Connecting { address } ->
+                    case result of
+                        Ok server ->
+                            if address == server.address then
+                                ( Running server
+                                , Cmd.none
+                                )
+
+                            else
+                                ( model, Cmd.none )
+
+                        Err err ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
 
 
         SetMessage message ->
@@ -228,7 +245,21 @@ update msg model =
                     ( model, Cmd.none )
 
 
-port connectToServer : String -> Cmd msg
+decodeServerConnected : ConnectionData -> Decoder Server
+decodeServerConnected { address, name } =
+    Json.Decode.map
+        (\context ->
+            { name = name
+            , address = address
+            , context = setContext context
+            , messages = []
+            , newMessage = ""
+            , clients = Dict.empty
+            }
+        )
+        (Json.Decode.field "client" Json.Decode.value)
+
+
 
 
 port sendMessage : String -> Cmd msg
@@ -245,32 +276,26 @@ view model =
         ]
     <|
         case model of
-            Waiting { username, serverName, serverAddress } ->
+            Waiting { name, address } ->
                 Element.column
-                    (Ui.card ++ [ Element.centerX, Element.centerY ])
-                    [ Input.text
+                    (Ui.card ++ [ Element.centerX, Element.centerY, Element.spacing 8 ])
+                    [ Element.text "Server:"
+                    , Input.text
                         []
-                        { onChange = SetUsername
-                        , text = username
+                        { onChange = SetServerAddress
+                        , text = address
                         , placeholder = Nothing
-                        , label = Input.labelLeft [] <| Element.text "Username"
+                        , label = Input.labelLeft [] <| Element.text "Address"
                         }
                     , Input.text
                         []
                         { onChange = SetServerName
-                        , text = serverName
+                        , text = name
                         , placeholder = Nothing
-                        , label = Input.labelLeft [] <| Element.text "Server Name"
-                        }
-                    , Input.text
-                        []
-                        { onChange = SetServerAddress
-                        , text = serverAddress
-                        , placeholder = Nothing
-                        , label = Input.labelLeft [] <| Element.text "Server Address"
+                        , label = Input.labelLeft [] <| Element.text "Nickname"
                         }
                     , Ui.button
-                        Ui.Color.primary
+                        (Ui.Color.primary ++ [ Element.alignRight ])
                         { onPress = Just ConnectToServer
                         , label = Element.text "Connect"
                         }
@@ -279,15 +304,14 @@ view model =
             Connecting _ ->
                 Element.text "Connecting ..."
 
-            Running { username, serverName, messages, newMessage, clients } ->
+            Running { name, messages, newMessage, clients } ->
                 Element.row
                     [ Element.width Element.fill
                     , Element.height Element.fill
                     ]
                     [ Element.column
                         Ui.card
-                        [ Element.text ("Username: " ++ username)
-                        , Element.text ("Server: " ++ serverName)
+                        [ Element.text ("Server: " ++ name)
                         ]
                     , Element.column
                         [ Element.height Element.fill
